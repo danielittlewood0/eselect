@@ -1,0 +1,118 @@
+# -*-eselect-*-
+# Copyright 2005-2021 Gentoo Authors
+# Distributed under the terms of the GNU GPL version 2 or later
+#
+# DOCUMENTATION
+# Following actions possible
+# * list		do_list()
+# * set			do_set()
+#
+# Behaviour:
+# do_list(): List all available .ovpn configurations.
+# do_set(): Choose a region and refresh the config file.
+
+# This script is very much a work in progress.
+# I use Private Internet Access, but have tried to remain provider-agnostic.
+# PIA distributes entire config files, which does not support my use case.
+# Options not included in the default PIA config are injected with openvpn.conf.tail, if it exists.
+
+DESCRIPTION="Manage openvpn locations"
+MAINTAINER="danielittlewood@gmail.com"
+VERSION="0.1"
+
+OPENVPN_ROOT="${EROOT}/etc/openvpn"
+REGION_LINK="current_region"
+
+find_targets() {
+	# Return the list of available regions
+	for fullpath in $(find ${OPENVPN_ROOT} -name *.ovpn)
+	do
+		realpath --relative-to="${OPENVPN_ROOT}" "$fullpath"
+	done
+}
+
+remove_symlinks() {
+	# Remove existing symlink
+	rm -f "${OPENVPN_ROOT}/${REGION_LINK}"
+}
+
+set_symlinks() {
+	# Set CURRENT_REGION symlink
+	local target=$1 targets
+	# target may be specified by its name or its index
+	if is_number "${target}"; then
+		# numeric index, find the target's name
+		targets=( $(find_targets) )
+		[[ ${target} -ge 1 && ${target} -le ${#targets[@]} ]] \
+			|| die -q "Number out of range: $1"
+		target=${targets[target-1]}
+	fi
+
+	# alternatively search for a region config matching target as a relative path
+	[[ -f ${OPENVPN_ROOT}/${target} ]] \
+		|| die -q "Target \"$1\" doesn't appear to be valid!"
+
+	echo "Switching ${REGION_LINK} to ${target} ..."
+	remove_symlinks || die -q "Couldn't remove existing symlink"
+	ln -s "${OPENVPN_ROOT}/${target}" "${OPENVPN_ROOT}/${REGION_LINK}" 
+	return 0
+}
+
+test_for_root() {
+	# checks if the user has rights to modify openvpn config
+	[[ -w ${OPENVPN_ROOT} ]] || die -q "You need root privileges!"
+}
+
+clobber_openvpn_conf() {
+	cat "${OPENVPN_ROOT}/${REGION_LINK}" "${OPENVPN_ROOT}/openvpn.conf.tail" > "${OPENVPN_ROOT}/openvpn.conf"
+}
+
+### list action ###
+
+describe_list() {
+	echo "List available VPN regions"
+}
+
+do_list() {
+	[[ $# -gt 0 ]] && die -q "Too many parameters"
+
+	local i targets
+	targets=( $(find_targets) )
+
+	for (( i = 0; i < ${#targets[@]}; i++ )); do
+		# Highlight the currently chosen version
+		[[ -e "${OPENVPN_ROOT}/${REGION_LINK}" ]] \
+        		&& [[ ${targets[i]} = "$(realpath --relative-to="${OPENVPN_ROOT}" "$(readlink "${OPENVPN_ROOT}/${REGION_LINK}")")" ]] \
+			&& targets[i]=$(highlight_marker  "${targets[i]}")
+
+	done
+	write_list_start "Available regions:"
+	write_numbered_list -m "(none found)" "${targets[@]}"
+}
+
+### set action ###
+
+describe_set() {
+	echo "Set a new region and refresh the config file (overwrites openvpn.conf)"
+}
+
+describe_set_options() {
+	echo "target : Target number (from 'list' action)"
+}
+
+describe_set_parameters() {
+	echo "<target>"
+}
+
+do_set() {
+	[[ -z $1 ]] && die -q "You didn't tell me what to set the symlink to"
+	[[ $# -gt 1 ]] && die -q "Too many parameters"
+	test_for_root
+
+	if [[ -e ${OPENVPN_ROOT}/${REGION_LINK} && ! -L ${OPENVPN_ROOT}/${REGION_LINK} ]]
+	then
+		die -q "${OPENVPN_ROOT}/${REGION_LINK} exists but is not a symlink"
+	fi
+
+	(set_symlinks "$1" && clobber_openvpn_conf) || die -q "Couldn't set a new symlink"
+}
