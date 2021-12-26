@@ -64,7 +64,11 @@ test_for_root() {
 }
 
 clobber_openvpn_conf() {
-	cat "${OPENVPN_ROOT}/${REGION_LINK}" "${OPENVPN_ROOT}/openvpn.conf.tail" > "${OPENVPN_ROOT}/openvpn.conf"
+  local files="${OPENVPN_ROOT}/${REGION_LINK}" 
+  if [[ -f "${OPENVPN_ROOT}/openvpn.conf.tail" ]]; then
+    files="${files} ${OPENVPN_ROOT}/openvpn.conf.tail"
+  fi
+	cat $files > "${OPENVPN_ROOT}/openvpn.conf"
 }
 
 ### list action ###
